@@ -1,10 +1,10 @@
 # HomeLab - Smart Home Security
 
-[Version](https://img.shields.io/pypi/v/homelab.svg)
-[Downloads](https://img.shields.io/pypi/dm/homelab.svg?style=plastic)
-[License](https://img.shields.io/pypi/dm/homelab.svg?style=plastic)
+[![Version](https://img.shields.io/pypi/v/homelab.svg)](http://pypi.python.org/pypi/HomeLab/)
+[![Downloads](https://img.shields.io/pypi/dm/homelab.svg?style=plastic)](http://pypi.python.org/pypi/HomeLab/)
+[![License](https://img.shields.io/pypi/dm/homelab.svg?style=plastic)](http://pypi.python.org/pypi/HomeLab/)
 
-[HomeLab demo](./img/banner.gif)
+[![HomeLab demo](./img/banner.gif)](http://pypi.python.org/pypi/HomeLab/)
 
 HomeLab enables you to secure and understand the network traffic in your Smart Home.
 It visualizes and analyzes the traffic of your network.
