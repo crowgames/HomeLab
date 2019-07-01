@@ -1,0 +1,45 @@
+#!/usr/bin/env python
+from homelab.analysis.networkscanner import getNetworkScanner
+from homelab.control.jobscheduler import getJobScheduler
+from homelab.websocket.websocketserver import WebSocketServer
+
+print("""HomeLab  Copyright (C) 2019  Nils Wenzler
+This program comes with ABSOLUTELY NO WARRANTY;""")
+
+from homelab.webserver.webserver import run
+
+import logging
+import threading
+import time
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s",
+    handlers=[
+        logging.FileHandler("logfile.txt"),
+        logging.StreamHandler()
+    ])
+
+def thread_monitor():
+    while True:
+        logging.info("THREADS")
+        logging.info("-----------------")
+        for t in threading.enumerate():
+            logging.info(t.name)
+        time.sleep(2)
+
+try:
+    """monitor = threading.Thread(target=thread_monitor, name="Thread Monitor")
+    monitor.start()"""
+
+    getNetworkScanner().enable_ip_forwarding()
+    time.sleep(1)
+    server_thread = threading.Thread(target=run, name="Webserver")
+    server_thread.start()
+
+    scheduler = getJobScheduler()
+    time.sleep(1)
+    wss = WebSocketServer()
+    time.sleep(1)
+except:
+    logging.exception("root level exception")

@@ -1,0 +1,3 @@
+recursive-include homelab/img *
+recursive-include homelab/static *
+include *.py
