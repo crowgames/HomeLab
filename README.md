@@ -16,15 +16,17 @@ It visualizes and analyzes the traffic of your network.
 
 ## Setup
 If not already available install Nmap on the target system:
-
+## Nmap installation
 Linux:
 ```
 sudo apt-get install nmap
 ```
 
 Windows:
+
 [https://nmap.org/download.html](https://nmap.org/download.html)
 
+## HomeLab installation
 Install python3.x and pip3 and run:
 
 ```
