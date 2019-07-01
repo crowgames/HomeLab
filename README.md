@@ -1,8 +1,8 @@
 # HomeLab - Smart Home Security
 
-[![Version](https://img.shields.io/pypi/v/homelab.svg)](http://pypi.python.org/pypi/HomeLab/)
+[![Version](https://img.shields.io/pypi/v/homelab.svg?style=plastic)](http://pypi.python.org/pypi/HomeLab/)
 [![Downloads](https://img.shields.io/pypi/dm/homelab.svg?style=plastic)](http://pypi.python.org/pypi/HomeLab/)
-[![License](https://img.shields.io/pypi/dm/homelab.svg?style=plastic)](http://pypi.python.org/pypi/HomeLab/)
+[![License](https://img.shields.io/pypi/l/homelab.svg?style=plastic)](http://pypi.python.org/pypi/HomeLab/)
 
 [![HomeLab demo](./img/banner.gif)](http://pypi.python.org/pypi/HomeLab/)
 
