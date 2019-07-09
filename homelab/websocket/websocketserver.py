@@ -66,7 +66,7 @@ class WebSocketServer:
 
     def __init__(self):
         logging.info("[*] Start local websocket server for app interaction")
-        self.start_server = websockets.serve(self.handle_connection, '192.168.8.107', 7463)
+        self.start_server = websockets.serve(self.handle_connection, '0.0.0.0', 7463)
 
         asyncio.get_event_loop().run_until_complete(self.start_server)
         asyncio.get_event_loop().run_forever()

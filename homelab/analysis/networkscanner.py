@@ -17,6 +17,7 @@ from scapy.sendrecv import srp, sr1, sr, send, sniff
 from scapy.utils import wrpcap
 import ctypes, os, sys
 
+from homelab.analysis.database import getDatabase
 from homelab.control.utils import get_cache_path
 
 instance = None
@@ -186,7 +187,7 @@ class NetworkScanner:
         #TODO: think about reintroducing filter
         logging.info("[*] Timeout:"+str(timeout))
         packets = sniff(iface=conf.iface, timeout=timeout)
-        wrpcap("/full_capture.pcap", packets)
+        wrpcap(get_cache_path()+"/full_capture.pcap", packets)
         logging.info("[*] Stopping network capture..Restoring network")
         self.still_poisoning = False
         for device in device_list:
@@ -211,22 +212,7 @@ class NetworkScanner:
             logging.info("[*] Enabled IP-forwarding for Mac")
             os.system("sysctl -w net.inet.ip.forwarding=1")
 
-    def ip2loc(self,ip):
-        """
-        returns the associated location for an IP adress
-        :param ip: address to look up
-        :return: {ip, lon, lat}
-        """
-        with shelve.open(get_cache_path()+'/ip2loc.db', writeback=True) as db:
-            if (ip not in db) or (len(ip) < 1):
-                resp = requests.get('http://tcit.crowgames.de/iplocation.php?ip=' + ip)
-                if resp.status_code != 200:
-                    logging.info("ip2loc request went wrong")
-                else:
-                    db[ip] = resp.json()
 
-                    logging.info(resp.text)
-            return db[ip]
 
     def add_locations_to_device(self, device):
         """
@@ -234,10 +220,10 @@ class NetworkScanner:
         :param scan_result:
         :return:
         """
-        device["location"] = self.ip2loc("")
+        device["location"] = getDatabase().ip2loc("")
         if("connections" in list(device.keys())):
             for remote in device["connections"].keys():
-                device["connections"][remote]["location"] = self.ip2loc(remote)
+                device["connections"][remote]["location"] = getDatabase().ip2loc(remote)
 
     def enforce_root(self):
         return
@@ -249,7 +235,7 @@ class NetworkScanner:
         """
         logging.info("[*] Lookup remote ips")
         place_list = []
-        start = self.ip2loc("")
+        start = getDatabase().ip2loc("")
         start["count"] = 0
         start["src"] = ""
         place_list.append(start)
@@ -257,7 +243,7 @@ class NetworkScanner:
             test = scan_result[device["ip"]]
             keys = scan_result[device["ip"]].items()
             for key, value in test.items():
-                place = self.ip2loc(key)
+                place = getDatabase().ip2loc(key)
                 place["count"] = value["count"]
                 place["threats"] = value["threats"]
                 place["src"] = device["ip"]

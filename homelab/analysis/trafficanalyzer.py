@@ -9,8 +9,9 @@ import socket
 import time
 
 from scapy.layers.dns import DNSRR
-from scapy.layers.inet import IP
+from scapy.layers.inet import IP, TCP
 
+from homelab.analysis.database import getDatabase
 from homelab.analysis.ipthreatdatabase import getIPThreatDatabase
 from homelab.analysis.networkscanner import getNetworkScanner
 from homelab.control.config import getConfig, USE_DNS
@@ -56,24 +57,35 @@ class TrafficAnalyzer:
                 ip_dst = pkt[IP].dst
                 foreign_ip = None
                 local_ip = None
+                hport = None
+                pport = None
 
                 if (ip_src in self.ana_res):
                     foreign_ip = ip_dst
                     local_ip = ip_src
+                    if TCP in pkt:
+                        hport = pkt[TCP].sport
+                        pport = pkt[TCP].dport
                     send = True
 
                 if (ip_dst in self.ana_res):
                     foreign_ip = ip_src
                     local_ip = ip_dst
+                    if TCP in pkt:
+                        hport = pkt[TCP].dport
+                        pport = pkt[TCP].sport
                     send = False
 
                 if(local_ip != None and foreign_ip != None):
                     if (foreign_ip not in self.ana_res[local_ip]):
                         if(send):
-                            self.ana_res[local_ip][foreign_ip] = {"snd": 1, "rcv":0, "bsnd": len(pkt), "brcv":0, "domains": [], "threats": []}
+                            self.ana_res[local_ip][foreign_ip] = {"snd": 1, "rcv":0, "bsnd": len(pkt), "brcv":0, "domains": [], "threats": [], "hports":{hport}, "pports":{pport}}
                         else:
-                            self.ana_res[local_ip][foreign_ip] = {"snd": 0, "rcv":1, "bsnd": len(pkt), "brcv":0, "domains": [], "threats": []}
+                            self.ana_res[local_ip][foreign_ip] = {"snd": 0, "rcv":1, "bsnd": len(pkt), "brcv":0, "domains": [], "threats": [], "hports":{hport}, "pports":{pport}}
                     else:
+                        self.ana_res[local_ip][foreign_ip]["hports"] = self.ana_res[local_ip][foreign_ip]["hports"] | {hport}
+                        self.ana_res[local_ip][foreign_ip]["pports"] = self.ana_res[local_ip][foreign_ip]["pports"] | {
+                            pport}
                         if(send):
                             self.ana_res[local_ip][foreign_ip]["snd"] += 1
                             self.ana_res[local_ip][foreign_ip]["bsnd"] += len(pkt)
@@ -103,6 +115,7 @@ class TrafficAnalyzer:
                     try:
                         reversed_dns = socket.gethostbyaddr(ip)
                         if(len(reversed_dns)>0):
+                            getDatabase().submit_ip_domain(ip, reversed_dns[0])
                             self.ana_res[key][ip]["domains"].append(reversed_dns[0])
                     except Exception:
                         logging.exception("no reverse dns for "+ip)
@@ -116,8 +129,10 @@ class TrafficAnalyzer:
                     if isinstance(pkt.an, DNSRR):
                         for key in self.ana_res.keys():
                             if(pkt.an.rdata in self.ana_res[key]):
-                                self.ana_res[key][pkt.an.rdata]["domains"].append(pkt.an.rrname.decode("utf-8"))
-                                # TODO: perform malicious dns lookup
+                                getDatabase().submit_ip_domain(pkt.an.rdata, pkt.an.rrname.decode("utf-8"))
+                                if(pkt.an.rrname.decode("utf-8") in ';;;'.join(self.ana_res[key][pkt.an.rdata]["domains"])):
+                                    self.ana_res[key][pkt.an.rdata]["domains"].append(pkt.an.rrname.decode("utf-8"))
+                                    # TODO: perform malicious dns lookup
         else:
             logging.info("      DNS traffic analysis disabled")
 

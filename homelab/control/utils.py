@@ -1,5 +1,7 @@
 import logging
 import os
+import socket
+import struct
 
 from appdirs import user_data_dir
 
@@ -10,3 +12,8 @@ def get_cache_path():
     if not os.path.exists(path):
         os.makedirs(path)
     return path
+
+def ip2int(addr):
+    if(len(addr)<1):
+        return 0
+    return struct.unpack("!I", socket.inet_aton(addr))[0]

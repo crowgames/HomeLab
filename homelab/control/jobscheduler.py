@@ -3,6 +3,7 @@ import threading
 import time
 from enum import Enum
 
+from homelab.analysis.database import getDatabase
 from homelab.analysis.devicelibrary import getDeviceLibrary
 from homelab.analysis.networkscanner import getNetworkScanner
 from homelab.analysis.trafficanalyzer import getTrafficAnalyzer
@@ -86,6 +87,7 @@ class JobScheduler:
         scan_result = getTrafficAnalyzer().analyze(packets, getDeviceLibrary().device_list)
 
         getDeviceLibrary().save_scan_result(scan_result)
+        getDatabase().save_scan_result(scan_result)
 
         # remove packets from memory (can be huge!)
         del packets

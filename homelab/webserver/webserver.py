@@ -2,47 +2,47 @@
 Copyright 2019, Nils Wenzler, All rights reserved.
 nils.wenzler@crowgames.de
 """
-import logging
+import json
+import threading
+import time
 import os
 from pathlib import Path
-from http.server import HTTPServer, BaseHTTPRequestHandler
+
+from flask import Flask, send_from_directory, request
+
+root = os.path.join(str(Path(os.path.dirname(os.path.realpath(__file__))).parent), 'static')
+app = Flask(__name__, static_folder=root, static_url_path='')
+
+recorded_data = []
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    app.logger.error("Path: "+str(path))
+    if path != "" and os.path.exists(app.static_folder + path):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
 
-class StaticServer(BaseHTTPRequestHandler):
+@app.route('/rest/get_data')
+def get_data():
+    return json.dumps(recorded_data)
 
-    def do_GET(self):
-        root = os.path.join(str(Path(os.path.dirname(os.path.realpath(__file__))).parent), 'static')
+@app.route('/rest/submit_data')
+def submit_data():
+    data_sample = json.loads(request.args["data"])
+    data_sample["time"] = time.time()
+    recorded_data.append(data_sample)
+    return ""
 
-        print(root)
-        # print(self.path)
-        if self.path == '/':
-            filename = root + '/index.html'
-        else:
-            filename = root + self.path
+def flask_run():
+    app.run(host='0.0.0.0', port=80)
 
-        self.send_response(200)
-        if filename[-4:] == '.css':
-            self.send_header('Content-type', 'text/css')
-        elif filename[-5:] == '.json':
-            self.send_header('Content-type', 'application/javascript')
-        elif filename[-3:] == '.js':
-            self.send_header('Content-type', 'application/javascript')
-        elif filename[-4:] == '.ico':
-            self.send_header('Content-type', 'image/x-icon')
-        else:
-            self.send_header('Content-type', 'text/html')
-        self.end_headers()
-        try:
-            with open(filename, 'rb') as fh:
-                html = fh.read()
-                # html = bytes(html, 'utf8')
-                self.wfile.write(html)
-        except Exception as e:
-            logging.exception(str(e))
+def run():
+    thread = threading.Thread(target=flask_run, args=())
+    thread.start()
 
-
-def run(server_class=HTTPServer, handler_class=StaticServer, port=7464):
-    server_address = ('', port)
-    httpd = server_class(server_address, handler_class)
-    logging.info('Starting httpd on port {}'.format(port))
-    httpd.serve_forever()
+if __name__ == "__main__":
+    run()
+    time.sleep(1000)
