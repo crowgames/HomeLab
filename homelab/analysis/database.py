@@ -3,20 +3,14 @@ Copyright 2019, Nils Wenzler, All rights reserved.
 nils.wenzler@crowgames.de
 """
 import logging
-import shelve
-import socket
-import time
-from uuid import getnode as get_mac
 
 import sqlite3
 
 import requests
-from scapy.layers.l2 import Ether, ARP
-from scapy.sendrecv import srp
-
-from homelab.analysis import nmap
+import time
 
 from appdirs import *
+from netaddr import IPNetwork, IPAddress
 
 from homelab.control.utils import get_cache_path, ip2int
 
@@ -31,7 +25,6 @@ def getDatabase():
 
 
 class Database:
-
     def __init__(self):
         self.library_path = get_cache_path() + '/database.db'
 
@@ -40,6 +33,30 @@ class Database:
             self.initialize_db(self.library_path)
 
         logging.info("database can be found at " + self.library_path)
+        logging.info(str(self.get_basic_device_list()))
+
+
+    def initialize(self):
+        getDatabase().insert_or_ignore_config("DNS_inspect", "1")
+        getDatabase().insert_or_ignore_config("scan_duration", "30")
+        getDatabase().insert_or_ignore_config("auto_update", "1")
+        getDatabase().insert_or_ignore_config("init_time", str(int(time.time())))
+        getDatabase().insert_or_ignore_config("num_pack_scan", "0")
+        getDatabase().insert_or_ignore_config("num_bytes_scan", "0")
+
+    def get_basic_device_list(self):
+        conn = sqlite3.connect(self.library_path)
+        conn.row_factory = sqlite3.Row
+
+        c = conn.cursor()
+
+        query = c.execute(
+            "SELECT *, Device.device_name as name FROM Device INNER JOIN (SELECT device_id, ip, MAX(time) from IPLease GROUP BY device_id) as t ON Device.device_id = t.device_id ORDER BY device_id ASC")
+        entries = query.fetchall()
+        conn.close()
+        entries = [dict(ix) for ix in entries]
+
+        return entries
 
     def initialize_db(self, library_path):
         conn = sqlite3.connect(library_path)
@@ -53,7 +70,8 @@ class Database:
          readable_name TEXT,
          first_seen INTEGER,
          last_active INTEGER,
-         last_time_deep_scan INTEGER
+         last_time_deep_scan INTEGER,
+         scan_enabled INTEGER DEFAULT 1
         )''')
 
         self.execute = c.execute('''CREATE TABLE IF NOT EXISTS IPLease (
@@ -82,6 +100,7 @@ class Database:
                          protocol TEXT,
                          hports TEXT,
                          pports TEXT,
+                         internal INTEGER,
                          PRIMARY KEY (device_id, external_ip, time)
                         )''')
 
@@ -91,17 +110,51 @@ class Database:
                                  PRIMARY KEY (ip, name)
                                 )''')
 
+        self.execute = c.execute('''CREATE TABLE IF NOT EXISTS OSDetection (
+                                         device_id INTEGER,
+                                         probability REAL,
+                                         time INTEGER,
+                                         os TEXT,
+                                         PRIMARY KEY (device_id, os)
+                                        )''')
+
+        self.execute = c.execute('''CREATE TABLE IF NOT EXISTS Port (
+                                                 device_id INTEGER,
+                                                 port INTEGER,
+                                                 name TEXT,
+                                                 product TEXT, 
+                                                 time INTEGER,
+                                                 PRIMARY KEY (device_id, port)
+                                                )''')
+
+        c.execute('''CREATE TABLE IF NOT EXISTS Config (
+                 name TEXT PRIMARY KEY,
+                 value TEXT
+                )''')
+
         conn.commit()
         conn.close()
 
     def save_scan_result(self, scan_result):
-        time = scan_result["time"]
+        timestamp = scan_result["time"]
         devices = scan_result["devices"]
 
         for device in devices:
-            self.update_device_in_db(device, time)
+            self.update_device_in_db(device, timestamp)
 
-    def update_device_in_db(self, device, time):
+    def save_network_scan(self, devices):
+        timestamp = time.time()
+        for device in devices:
+            self.update_device_in_db(device, timestamp)
+
+    def get_conn_cursor(self):
+        conn = sqlite3.connect(self.library_path)
+        conn.row_factory = sqlite3.Row
+
+        c = conn.cursor()
+        return (conn, c)
+
+    def update_device_in_db(self, device, timestamp):
         conn = sqlite3.connect(self.library_path)
         conn.row_factory = sqlite3.Row
 
@@ -110,16 +163,18 @@ class Database:
 
         entries = c.fetchall()
 
-        data = {"mac": device["mac"], "name": device["name"], "first_seen": int(time), "last_active": int(time)}
+        data = {"mac": device["mac"], "name": device["name"], "first_seen": int(timestamp), "last_active": int(timestamp), "last_time_deep_scan": 0}
+        if("last_time_deep_scan" in device):
+                data["last_time_deep_scan"] = device["last_time_deep_scan"]
 
         if len(entries) == 0:
             c.execute(
-                "INSERT INTO Device (mac, device_name, first_seen, last_active) VALUES ('{mac}', '{name}', {first_seen}, {last_active}) ".format(
+                "INSERT INTO Device (mac, device_name, first_seen, last_active, last_time_deep_scan) VALUES ('{mac}', '{name}', {first_seen}, {last_active}, {last_time_deep_scan}) ".format(
                     **data))
         else:
             data["device_id"] = entries[0]["device_id"]
             c.execute(
-                "UPDATE Device SET mac='{mac}', device_name='{name}', last_active={last_active} WHERE device_id = {device_id}".format(
+                "UPDATE Device SET mac='{mac}', device_name='{name}', last_active={last_active}, last_time_deep_scan={last_time_deep_scan} WHERE device_id = {device_id}".format(
                     **data))
 
         c.execute("SELECT * FROM Device WHERE mac=?", (device["mac"],))
@@ -133,19 +188,100 @@ class Database:
         if len(entries) == 0 or entries[0]["ip"] != device["ip"]:
             c.execute(
                 "INSERT INTO IPLease (device_id, ip, time) VALUES (?, ?, ?) ",
-                (db_device["device_id"], device["ip"], int(time)))
+                (db_device["device_id"], device["ip"], int(timestamp)))
 
         # insert connection information
-        for rip in list(device["connections"].keys()):
-            c.execute(
-                "INSERT INTO Communication (device_id, external_ip, bsnd, brcv, psnd, prcv, time, hports, pports) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ",
-                (db_device["device_id"], ip2int(rip), device["connections"][rip]["bsnd"],
-                 device["connections"][rip]["brcv"], device["connections"][rip]["snd"],
-                 device["connections"][rip]["rcv"], int(time), ",".join(map(str,device["connections"][rip]["hports"])), ",".join(map(str,device["connections"][rip]["pports"]))))
+        if "connections" in device:
+
+            cidr = getDatabase().get_config("home_cidr")
+            first = IPNetwork(cidr).first
+            last = IPNetwork(cidr).first
+
+            for rip in list(device["connections"].keys()):
+                if "hports" not in device["connections"][rip]:
+                    device["connections"][rip]["hports"] = []
+                    device["connections"][rip]["pports"] = []
+
+                internal = 1 if (IPAddress(rip) in IPNetwork(getDatabase().get_config("home_cidr"))) else 0
+
+                c.execute(
+                    "INSERT INTO Communication (device_id, external_ip, bsnd, brcv, psnd, prcv, time, hports, pports, internal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
+                    (db_device["device_id"], ip2int(rip), device["connections"][rip]["bsnd"],
+                     device["connections"][rip]["brcv"], device["connections"][rip]["snd"],
+                     device["connections"][rip]["rcv"], int(timestamp), ",".join(map(str,device["connections"][rip]["hports"])), ",".join(map(str,device["connections"][rip]["pports"])), internal))
+
+        # insert os detection
+        if("osmatch" in device):
+            for os in device["osmatch"]:
+                c.execute(
+                    "INSERT OR IGNORE INTO OSDetection (device_id, probability, time, os) VALUES (?, ?, ?, ?) ",
+                    (db_device["device_id"], os["accuracy"], int(timestamp), os["name"]))
+
+        # insert known open ports
+        if ("tcp" in device):
+            for port in list(device["tcp"].keys()):
+                c.execute(
+                    "INSERT OR IGNORE INTO Port (device_id, port, name, product, time) VALUES (?, ?, ?, ?, ?) ",
+                    (db_device["device_id"], port, device["tcp"][port]["name"], device["tcp"][port]["product"], int(timestamp)))
+
 
         conn.commit()
 
         conn.close()
+
+    def insert_or_replace_config(self, name, value):
+        conn = sqlite3.connect(self.library_path)
+        conn.row_factory = sqlite3.Row
+
+        c = conn.cursor()
+
+        c.execute("INSERT OR REPLACE INTO Config (name, value) VALUES (?,?)",(name, value, ))
+
+        conn.commit()
+
+        conn.close()
+
+    def insert_or_ignore_config(self, name, value):
+        conn = sqlite3.connect(self.library_path)
+        conn.row_factory = sqlite3.Row
+
+        c = conn.cursor()
+
+        c.execute("INSERT OR IGNORE INTO Config (name, value) VALUES (?,?)",(name, value, ))
+
+        conn.commit()
+
+        conn.close()
+
+    def get_config(self, name):
+        conn = sqlite3.connect(self.library_path)
+        conn.row_factory = sqlite3.Row
+
+        c = conn.cursor()
+
+        c.execute("SELECT * FROM Config WHERE name = ?",(name, ))
+
+        entries = c.fetchall()
+        conn.commit()
+        conn.close()
+
+        if(len(entries)<1):
+            return None
+
+        return entries[0]["value"]
+
+    def get_all_configs(self):
+        conn = sqlite3.connect(self.library_path)
+        conn.row_factory = sqlite3.Row
+
+        c = conn.cursor()
+        c.execute("SELECT * FROM Config" )
+        entries = c.fetchall()
+        conn.commit()
+        conn.close()
+
+        return [dict(ix) for ix in entries]
+
 
     def ip2loc(self, ip):
         """
@@ -168,21 +304,25 @@ class Database:
             return {"city": entries[0]["city"], "lon": entries[0]["longitude"], "lat": entries[0]["latitude"],
                     "cc": entries[0]["country"]}
         else:
-            resp = requests.get('http://tcit.crowgames.de/iplocation.php?ip=' + ip)
-            if resp.status_code != 200:
-                logging.error("ip2loc request went wrong")
-            else:
-                try:
-                    resp = resp.json()
+            try:
+                resp = requests.get('http://tcit.crowgames.de/iplocation.php?ip=' + ip)
+                if resp.status_code != 200:
+                    logging.error("ip2loc request went wrong")
+                else:
+                    try:
+                        resp = resp.json()
 
-                    c.execute("INSERT INTO IPLocation (ip, longitude, latitude, city, country) VALUES (?, ?, ?, ?, ?) ",
-                              (intip, resp["lon"], resp["lat"], resp["city"], resp["cc"]))
+                        c.execute("INSERT INTO IPLocation (ip, longitude, latitude, city, country) VALUES (?, ?, ?, ?, ?) ",
+                                  (intip, resp["lon"], resp["lat"], resp["city"], resp["cc"]))
 
-                except Exception:
-                    return {"city": "unknown", "lon": 0, "lat": 0, "cc": "??"}
-                conn.commit()
-                conn.close()
-                return self.ip2loc(ip)
+                    except Exception:
+                        return {"city": "unknown", "lon": 0, "lat": 0, "cc": "??"}
+                    conn.commit()
+                    conn.close()
+                    return self.ip2loc(ip)
+            except Exception:
+                print(Exception)
+                return {"city": "unknown", "lon": 0, "lat": 0, "cc": "??"}
 
     def submit_ip_domain(self, ip, domain):
         conn = sqlite3.connect(self.library_path)

@@ -4,6 +4,7 @@ import socket
 import struct
 
 from appdirs import user_data_dir
+from netaddr import IPNetwork
 
 
 def get_cache_path():

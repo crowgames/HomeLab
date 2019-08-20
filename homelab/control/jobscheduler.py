@@ -30,18 +30,24 @@ class JobScheduler:
     lastSearch = 1
     thread = None
 
+    def isInScanningEnviornment(self):
+        cur_def = getNetworkScanner().get_mac(getNetworkScanner().get_default_gateway())
+        stored_def = getDatabase().get_config("home_mac")
+        return cur_def == stored_def or cur_def == None
+
     def getLastUpdate(self):
         return max(self.lastScan, self.lastSearch)
 
     def __init__(self):
         self.thread = threading.Thread(target=self.work, name="JobScheduler")
         self.thread.start()
+        getDatabase().initialize()
 
     def work(self):
         while(True):
-            if(self.curJob == Job.IDLE):
+            if(self.curJob == Job.IDLE and  self.isInScanningEnviornment()):
                 # if no device found go for device search
-                if(len(getDeviceLibrary().device_list)==0):
+                if(len(getDatabase().get_basic_device_list())==0):
                     self.startDeviceSearch()
                     continue
 
@@ -57,8 +63,8 @@ class JobScheduler:
 
                 # if devices exist that have not been fingerprinted fingerprint
                 tmp_cnt = False
-                for device in getDeviceLibrary().device_list:
-                    if("fingerprint" not in device):
+                for device in getDatabase().get_basic_device_list():
+                    if not (device["last_time_deep_scan"] > 0):
                         self.startDeviceFingerprint(device)
                         tmp_cnt = True
                         break
@@ -66,6 +72,10 @@ class JobScheduler:
                     continue
 
                 # otherwise idle for a minute
+                self.startIdle()
+            else:
+                # idle if you cannot scan
+                logging.info("[i] not in home network")
                 self.startIdle()
 
     def startDeviceSearch(self):
@@ -81,10 +91,11 @@ class JobScheduler:
         self.curJob = Job.NETWORK_CAPTURE
         getNetworkScanner().set_devices_scanning(getDeviceLibrary().device_list, 1)
         getNetworkScanner().print_device_list(getDeviceLibrary().device_list)
-        packets = getNetworkScanner().sniff_devices(getDeviceLibrary().device_list, timeout=30)
+
+        packets = getNetworkScanner().sniff_devices(getDatabase().get_basic_device_list(), timeout=int(getDatabase().get_config("scan_duration")))
         self.curJob = Job.NETWORK_ANALYZE
         getNetworkScanner().set_devices_scanning(getDeviceLibrary().device_list, 0)
-        scan_result = getTrafficAnalyzer().analyze(packets, getDeviceLibrary().device_list)
+        scan_result = getTrafficAnalyzer().analyze(packets, getDatabase().get_basic_device_list())
 
         getDeviceLibrary().save_scan_result(scan_result)
         getDatabase().save_scan_result(scan_result)
@@ -99,7 +110,8 @@ class JobScheduler:
     def startDeviceFingerprint(self, device):
         logging.info("[i] start device fingerpinting job")
         self.curJob = Job.FINGERPRINT
-        getDeviceLibrary().fingerprint_device(device)
+        device = getDeviceLibrary().fingerprint_device(device)
+        getDatabase().update_device_in_db(device, time.time())
         logging.info("[i] finished device fingerpinting job")
         self.curJob = Job.IDLE
 

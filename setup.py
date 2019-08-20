@@ -37,6 +37,6 @@ setup(
 
     # Dependent packages (distributions)
     install_requires=[
-        "websockets", "pympler", "scapy", "requests", "netifaces", "appdirs", "flask"
+        "websockets", "pympler", "scapy", "requests", "netifaces", "appdirs", "flask", "flask-cors", "netaddr", "autoupgrade"
     ],
 )

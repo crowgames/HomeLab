@@ -8,6 +8,7 @@ import time
 import websockets
 from pympler import muppy, summary
 
+from homelab.analysis.database import getDatabase
 from homelab.analysis.devicelibrary import getDeviceLibrary
 from homelab.analysis.networkscanner import getNetworkScanner
 from homelab.control.jobscheduler import getJobScheduler
@@ -36,7 +37,7 @@ class WebSocketServer:
     async def scan(self, websocket):
         cnt = 0
         default_gateway = getNetworkScanner().get_default_gateway()
-        cidr = default_gateway + "/24"
+        cidr = getDatabase().get_config("home_cidr")
         last_update = 0
         while(True):
 

